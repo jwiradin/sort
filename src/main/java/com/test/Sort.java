@@ -97,7 +97,7 @@ public class Sort {
     private static void processFile(Connection dbConnection, File file){
 
         StringBuilder sb = new StringBuilder();
-        Pattern ex = Pattern.compile("^([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[02][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
+        Pattern ex = Pattern.compile("^([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
         String tmp ="";
         String prvKey = "";
         Long seq = Long.parseLong("0");
@@ -111,15 +111,14 @@ public class Sort {
 
             Scanner sc = new Scanner(file);
 
-            while(sc.hasNext()){
+            while(sc.hasNext()) {
                 tmp = sc.nextLine();
-                if(tmp.length()>0) {
+                if (ex.matcher(tmp).find()) {
                     prvKey = tmp.substring(0, 23) + String.format("000000", seq);
                     sb.append(tmp + "\n");
-                }
-                while(sc.hasNext()) {
-                    tmp = sc.nextLine();
-                    if(tmp.length()>0) {
+
+                    while (sc.hasNext()) {
+                        tmp = sc.nextLine();
                         if (ex.matcher(tmp).find()) {
                             ps.setString(1, prvKey);
                             ps.setString(2, sb.toString());
@@ -141,7 +140,7 @@ public class Sort {
             ps.close();
         }
         catch (StringIndexOutOfBoundsException bex){
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " " + bex.getMessage());
+            System.out.println(dtFormatter.format(LocalDateTime.now()) + " prvkey:"+ prvKey+" string:" + tmp + " - "  + bex.getMessage());
         }
         catch (SQLException exs){
             System.out.println(dtFormatter.format(LocalDateTime.now()) + " " +exs.getMessage());
