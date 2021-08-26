@@ -1,16 +1,15 @@
 package com.test;
 
+import org.apache.log4j.*;
+
 import java.io.*;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Calendar;
-import java.util.Locale;
 import java.util.Scanner;
-import java.util.concurrent.Callable;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 
 public class Sort {
 
@@ -26,25 +25,38 @@ public class Sort {
 
     private static String path;
 
-    public static void main(String[] args) {
+    private static Logger log;
 
-        if (args.length == 0 || !args[0].startsWith("-p")) {
-            System.out.println("Parameter: -p=log file path");
+    public static void main(String[] args) {
+        Logger root = Logger.getRootLogger();
+        root.addAppender(new ConsoleAppender(new PatternLayout("%d %p (%t) [%c] - %m%n")));
+        root.setLevel(Level.INFO);
+
+        for (String a: args) {
+            if(a.startsWith("-p")){
+                path = a.substring(3, args[0].length());
+            }else if(a.startsWith("-d")){
+                root.setLevel(Level.DEBUG);
+            }
+        }
+        if ("".equals(path)){
+            System.out.println("argument -p=path to log folder is required");
             return;
         }
 
-        path = args[0].substring(3, args[0].length());
+        log = Logger.getLogger(Sort.class);
 
         try {
 
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " Starting ----");
+            log.info("Starting ----");
             Connection dbConnection = prepareDB();
             Process(dbConnection, path);
             dbConnection.close();
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " Completed ----");
+            log.info("Completed ----");
+            //System.out.println(dtFormatter.format(LocalDateTime.now()) + " Completed ----");
 
         } catch (Exception ex) {
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " Error: " + ex.getMessage());
+            log.error(ex);
         }
 
     }
@@ -72,20 +84,21 @@ public class Sort {
 
                 if (!output.exists()) {
 
-                    System.out.println(dtFormatter.format(LocalDateTime.now()) + " Start processing file: " + file.getAbsolutePath());
+                    log.info("Start processing file: " + file.getAbsolutePath());
                     processFile(dbConnection, file);
 
                     rs = dbConnection.prepareStatement("Select data from data order by id").executeQuery();
 
                     BufferedWriter writer = new BufferedWriter(new FileWriter(output.getAbsolutePath()));
-
+                    log.debug("Writing to file");
                     while(rs.next()){
                         writer.write(rs.getString("data"));
                     }
                     writer.close();
+                    log.info("End processing file: " + file.getAbsolutePath());
 
                 } else{
-                    System.out.println(dtFormatter.format(LocalDateTime.now()) + " File: "+ file.getAbsolutePath() + " has been previously sorted.");
+                    log.info("File: "+ file.getAbsolutePath() + " has been previously sorted.");
                 }
             }
 
@@ -97,7 +110,7 @@ public class Sort {
     private static void processFile(Connection dbConnection, File file){
 
         StringBuilder sb = new StringBuilder();
-        Pattern ex = Pattern.compile("^([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
+        Pattern ex = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
         String tmp ="";
         String prvKey = "";
         Long seq = Long.parseLong("0");
@@ -110,26 +123,30 @@ public class Sort {
             ps = dbConnection.prepareStatement("insert into data (id,data) values(?,?)");
 
             Scanner sc = new Scanner(file);
-
+            Matcher m;
             while(sc.hasNext()) {
                 tmp = sc.nextLine();
-                if (ex.matcher(tmp).find()) {
-                    prvKey = tmp.substring(0, 23) + String.format("000000", seq);
+                m = ex.matcher(tmp);
+                if (m.find()) {
+                    prvKey = m.group(0) + String.format("000000", seq);
                     sb.append(tmp + "\n");
 
                     while (sc.hasNext()) {
                         tmp = sc.nextLine();
-                        if (ex.matcher(tmp).find()) {
+                        m = ex.matcher(tmp);
+                        if (m.find()) {
                             ps.setString(1, prvKey);
                             ps.setString(2, sb.toString());
                             ps.executeUpdate();
 
                             seq++;
-                            prvKey = tmp.substring(0, 23) + String.format("000000", seq);
+                            prvKey = m.group(0) + String.format("000000", seq);
                             sb.setLength(0);
                         }
                         sb.append(tmp + "\n");
                     }
+                } else {
+                    log.debug("Skipping:" + tmp);
                 }
             }
             if(sb.length()>0) {
@@ -139,14 +156,14 @@ public class Sort {
             }
             ps.close();
         }
-        catch (StringIndexOutOfBoundsException bex){
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " prvkey:"+ prvKey+" string:" + tmp + " - "  + bex.getMessage());
+        catch (StringIndexOutOfBoundsException e){
+            log.error(e);
         }
-        catch (SQLException exs){
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " " +exs.getMessage());
+        catch (SQLException e){
+            log.error(e);
         }
-        catch(FileNotFoundException exf){
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " " +exf.getMessage());
+        catch(FileNotFoundException e){
+            log.error(e);
         }
     }
 
@@ -154,19 +171,20 @@ public class Sort {
         Connection dbConnection = null;
 
         try {
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " Starting in memory h2 server");
+            log.debug("Starting in memory h2 server");
             Class.forName(DB_DRIVER);
             dbConnection = DriverManager.getConnection(DB_CONNECTION, DB_USER, DB_PASSWORD);
 
+            log.debug("Creating table");
             PreparedStatement createTable = dbConnection.prepareStatement(CREATE_TABLE);
             createTable.executeUpdate();
             createTable.close();
 
             return dbConnection;
         } catch (SQLException e) {
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " " + e.getMessage());
+            log.error(e);
         } catch (ClassNotFoundException e) {
-            System.out.println(dtFormatter.format(LocalDateTime.now()) + " " + e.getMessage());
+            log.error(e);
         }
 
         return  null;
