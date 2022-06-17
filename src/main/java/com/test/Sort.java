@@ -1,6 +1,8 @@
 package com.test;
 
 import org.apache.log4j.*;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.*;
 import java.sql.*;
@@ -27,6 +29,8 @@ public class Sort {
 
     private static Logger log;
 
+    private static String filter;
+
     public static void main(String[] args) {
         Logger root = Logger.getRootLogger();
         root.addAppender(new ConsoleAppender(new PatternLayout("%d %p (%t) [%c] - %m%n")));
@@ -34,9 +38,11 @@ public class Sort {
 
         for (String a: args) {
             if(a.startsWith("-p")){
-                path = a.substring(3, args[0].length());
+                path = a.substring(3);
             }else if(a.startsWith("-d")){
                 root.setLevel(Level.DEBUG);
+            }else if(a.startsWith("-f")){
+                filter = a.substring(3);
             }
         }
         if ("".equals(path)){
@@ -50,7 +56,7 @@ public class Sort {
 
             log.info("Starting ----");
             Connection dbConnection = prepareDB();
-            Process(dbConnection, path);
+            Process(dbConnection, path, filter);
             dbConnection.close();
             log.info("Completed ----");
             //System.out.println(dtFormatter.format(LocalDateTime.now()) + " Completed ----");
@@ -61,7 +67,8 @@ public class Sort {
 
     }
 
-    private static void Process(Connection dbConnection, String path) {
+    private static void Process(Connection dbConnection, String path, String filter) {
+        String sql;
 
         FilenameFilter init = new FilenameFilter() {
             @Override
@@ -85,12 +92,26 @@ public class Sort {
                 if (!output.exists()) {
 
                     log.info("Start processing file: " + file.getAbsolutePath());
-                    processFile(dbConnection, file);
 
-                    rs = dbConnection.prepareStatement("Select data from data order by id").executeQuery();
+                    if (!extract(dbConnection,file)){
+                        processFile(dbConnection, file);
+                    }
+
+                    if(filter == null) {
+                        sql = "Select id, data from data order by id";
+                    }
+                    else {
+                        sql = "Select d.id, d.data from data d where d.data ilike '%filter%' order by d.id";
+                    }
+
+                    rs = dbConnection.prepareStatement("select count(*) from data").executeQuery();
+                    if(rs.next()) log.debug(String.format("%04d",rs.getInt(1)));
+
+                    rs = dbConnection.prepareStatement(sql).executeQuery();
 
                     BufferedWriter writer = new BufferedWriter(new FileWriter(output.getAbsolutePath()));
                     log.debug("Writing to file");
+
                     while(rs.next()){
                         writer.write(rs.getString("data"));
                     }
@@ -105,6 +126,95 @@ public class Sort {
         } catch (Exception ex) {
             System.out.println(dtFormatter.format(LocalDateTime.now()) + " " + ex.getMessage());
         }
+    }
+
+    private static boolean extract(Connection dbConnection, File file) {
+        log.debug("Extract");
+        String ln;
+        try {
+            Scanner sc = new Scanner(file);
+            if (sc.hasNext()) {
+                ln = sc.nextLine();
+                sc.close();
+
+                if (ln.indexOf("{\"message\":") != 25) {
+                    return false;
+                }
+                else {
+
+                    StringBuilder sb = new StringBuilder();
+                    Pattern ex = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
+                    String tmp = "";
+                    String prvKey = "";
+                    Long seq = Long.parseLong("0");
+                    JSONObject json = null;
+                    try {
+                        PreparedStatement ps = dbConnection.prepareStatement("truncate table data");
+                        ps.executeUpdate();
+                        ps.close();
+                        sc = new Scanner(file);
+                        ps = dbConnection.prepareStatement("insert into data (id,data) values(?,?)");
+
+                        Matcher m;
+                        while (sc.hasNext()) {
+                            json = new JSONObject(sc.nextLine().substring(25));
+
+                            if (json.has("message")) {
+                                tmp = json.get("message").toString();
+
+                                m = ex.matcher(tmp);
+                                if (m.find()) {
+                                    prvKey = m.group(0) + String.format("%06d", seq);
+                                    sb.append(tmp + "\n");
+
+                                    while (sc.hasNext()) {
+                                        json = new JSONObject(sc.nextLine().substring(25));
+                                        if (json.has("message")) {
+                                            tmp = json.get("message").toString();
+                                            m = ex.matcher(tmp);
+                                            if (m.find()) {
+                                                ps.setString(1, prvKey);
+                                                ps.setString(2, sb.toString());
+                                                ps.executeUpdate();
+
+                                                seq++;
+                                                prvKey = m.group(0) + String.format("%06d", seq);
+                                                sb.setLength(0);
+                                            }
+                                            sb.append(tmp + "\n");
+                                        }
+                                    }
+                                } else {
+                                    log.debug("Skipping:" + tmp);
+                                }
+
+                            }
+                            else {
+                                log.debug(json.toString());
+                            }
+                        }
+                        if (sb.length() > 0) {
+                            ps.setString(1, prvKey);
+                            ps.setString(2, sb.toString());
+                            ps.executeUpdate();
+                        }
+                        ps.close();
+                    } catch (StringIndexOutOfBoundsException e) {
+                        log.error(e);
+                    } catch (SQLException e) {
+                        log.error(e);
+                    } catch ( JSONException e){
+
+                        log.debug(json.toString());
+                        log.error(e);
+                    }
+
+                }
+            }
+        } catch (FileNotFoundException e) {
+            log.error(e);
+        }
+        return true;
     }
 
     private static void processFile(Connection dbConnection, File file){
@@ -128,7 +238,7 @@ public class Sort {
                 tmp = sc.nextLine();
                 m = ex.matcher(tmp);
                 if (m.find()) {
-                    prvKey = m.group(0) + String.format("000000", seq);
+                    prvKey = m.group(0) + String.format("%06d", seq);
                     sb.append(tmp + "\n");
 
                     while (sc.hasNext()) {
@@ -140,7 +250,7 @@ public class Sort {
                             ps.executeUpdate();
 
                             seq++;
-                            prvKey = m.group(0) + String.format("000000", seq);
+                            prvKey = m.group(0) + String.format("%06d", seq);
                             sb.setLength(0);
                         }
                         sb.append(tmp + "\n");
