@@ -36,16 +36,16 @@ public class Sort {
         root.addAppender(new ConsoleAppender(new PatternLayout("%d %p (%t) [%c] - %m%n")));
         root.setLevel(Level.INFO);
 
-        for (String a: args) {
-            if(a.startsWith("-p")){
+        for (String a : args) {
+            if (a.startsWith("-p")) {
                 path = a.substring(3);
-            }else if(a.startsWith("-d")){
+            } else if (a.startsWith("-d")) {
                 root.setLevel(Level.DEBUG);
-            }else if(a.startsWith("-f")){
+            } else if (a.startsWith("-f")) {
                 filter = a.substring(3);
             }
         }
-        if ("".equals(path)){
+        if ("".equals(path)) {
             System.out.println("argument -p=path to log folder is required");
             return;
         }
@@ -93,33 +93,32 @@ public class Sort {
 
                     log.info("Start processing file: " + file.getAbsolutePath());
 
-                    if (!extract(dbConnection,file)){
-                        processFile(dbConnection, file);
-                    }
+                    //if (!extract(dbConnection, file)) {
+                    processFile(dbConnection, file);
+                    //}
 
-                    if(filter == null) {
+                    if (filter == null) {
                         sql = "Select id, data from data order by id";
-                    }
-                    else {
+                    } else {
                         sql = "Select d.id, d.data from data d where d.data ilike '%filter%' order by d.id";
                     }
 
                     rs = dbConnection.prepareStatement("select count(*) from data").executeQuery();
-                    if(rs.next()) log.debug(String.format("%04d",rs.getInt(1)));
+                    if (rs.next()) log.debug(String.format("%04d", rs.getInt(1)));
 
                     rs = dbConnection.prepareStatement(sql).executeQuery();
 
                     BufferedWriter writer = new BufferedWriter(new FileWriter(output.getAbsolutePath()));
                     log.debug("Writing to file");
 
-                    while(rs.next()){
+                    while (rs.next()) {
                         writer.write(rs.getString("data"));
                     }
                     writer.close();
                     log.info("End processing file: " + file.getAbsolutePath());
 
-                } else{
-                    log.info("File: "+ file.getAbsolutePath() + " has been previously sorted.");
+                } else {
+                    log.info("File: " + file.getAbsolutePath() + " has been previously sorted.");
                 }
             }
 
@@ -127,7 +126,7 @@ public class Sort {
             System.out.println(dtFormatter.format(LocalDateTime.now()) + " " + ex.getMessage());
         }
     }
-
+/*
     private static boolean extract(Connection dbConnection, File file) {
         log.debug("Extract");
         String ln;
@@ -139,8 +138,7 @@ public class Sort {
 
                 if (ln.indexOf("{\"message\":") != 25) {
                     return false;
-                }
-                else {
+                } else {
 
                     StringBuilder sb = new StringBuilder();
                     Pattern ex = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
@@ -188,8 +186,7 @@ public class Sort {
                                     log.debug("Skipping:" + tmp);
                                 }
 
-                            }
-                            else {
+                            } else {
                                 log.debug(json.toString());
                             }
                         }
@@ -203,7 +200,7 @@ public class Sort {
                         log.error(e);
                     } catch (SQLException e) {
                         log.error(e);
-                    } catch ( JSONException e){
+                    } catch (JSONException e) {
 
                         log.debug(json.toString());
                         log.error(e);
@@ -217,11 +214,11 @@ public class Sort {
         return true;
     }
 
-    private static void processFile(Connection dbConnection, File file){
+    private static void processFile(Connection dbConnection, File file) {
 
         StringBuilder sb = new StringBuilder();
         Pattern ex = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
-        String tmp ="";
+        String tmp = "";
         String prvKey = "";
         Long seq = Long.parseLong("0");
 
@@ -234,7 +231,7 @@ public class Sort {
 
             Scanner sc = new Scanner(file);
             Matcher m;
-            while(sc.hasNext()) {
+            while (sc.hasNext()) {
                 tmp = sc.nextLine();
                 m = ex.matcher(tmp);
                 if (m.find()) {
@@ -259,25 +256,106 @@ public class Sort {
                     log.debug("Skipping:" + tmp);
                 }
             }
-            if(sb.length()>0) {
+            if (sb.length() > 0) {
                 ps.setString(1, prvKey);
                 ps.setString(2, sb.toString());
                 ps.executeUpdate();
             }
             ps.close();
-        }
-        catch (StringIndexOutOfBoundsException e){
+        } catch (StringIndexOutOfBoundsException e) {
+            log.error(e);
+        } catch (SQLException e) {
+            log.error(e);
+        } catch (FileNotFoundException e) {
             log.error(e);
         }
-        catch (SQLException e){
+    }
+*/
+    private static void processFile(Connection dbConnection, File file) {
+
+        StringBuilder sb = new StringBuilder();
+        Pattern ex = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2}\\W[0-2][0-9]:[0-5][0-9]:[0-5][0-9],[0-9]{3}\\W)");
+        String tmp = "";
+        String prvKey = "";
+        Long seq = Long.parseLong("0");
+        boolean isJSON = false;
+        JSONObject json;
+
+        try {
+
+            Scanner sc = new Scanner(file);
+            if (sc.hasNext()) {
+                tmp = sc.nextLine();
+                sc.close();
+
+                if (tmp.indexOf("{\"message\":") != 25) {
+                    isJSON = true;
+                }
+            }
+
+            PreparedStatement ps = dbConnection.prepareStatement("truncate table data");
+            ps.executeUpdate();
+            ps.close();
+
+            ps = dbConnection.prepareStatement("insert into data (id,data) values(?,?)");
+
+            sc = new Scanner(file);
+            Matcher m;
+            while (sc.hasNext()) {
+                tmp = sc.nextLine();
+
+                if (isJSON) {
+                    json = new JSONObject(tmp.substring(25));
+
+                    if (json.has("message")) {
+                        tmp = json.get("message").toString();
+                    }
+                    else {
+                        continue;
+                    }
+                }
+
+                m = ex.matcher(tmp);
+                if (m.find()) {
+                    prvKey = m.group(0) + String.format("%06d", seq);
+                    sb.append(tmp + "\n");
+
+                    while (sc.hasNext()) {
+                        tmp = sc.nextLine();
+                        m = ex.matcher(tmp);
+                        if (m.find()) {
+                            ps.setString(1, prvKey);
+                            ps.setString(2, sb.toString());
+                            ps.executeUpdate();
+
+                            seq++;
+                            prvKey = m.group(0) + String.format("%06d", seq);
+                            sb.setLength(0);
+                        }
+                        sb.append(tmp + "\n");
+                    }
+                } else {
+                    log.debug("Skipping:" + tmp);
+                }
+            }
+            if (sb.length() > 0) {
+                ps.setString(1, prvKey);
+                ps.setString(2, sb.toString());
+                ps.executeUpdate();
+            }
+            ps.close();
+        } catch (StringIndexOutOfBoundsException e) {
             log.error(e);
-        }
-        catch(FileNotFoundException e){
+        } catch (SQLException e) {
+            log.error(e);
+        } catch (FileNotFoundException e) {
+            log.error(e);
+        } catch (JSONException e) {
             log.error(e);
         }
     }
 
-    private static Connection prepareDB(){
+    private static Connection prepareDB() {
         Connection dbConnection = null;
 
         try {
@@ -297,6 +375,6 @@ public class Sort {
             log.error(e);
         }
 
-        return  null;
+        return null;
     }
 }
