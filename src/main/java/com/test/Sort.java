@@ -64,7 +64,6 @@ public class Sort {
         } catch (Exception ex) {
             log.error(ex);
         }
-
     }
 
     private static void Process(Connection dbConnection, String path, String filter) {
@@ -73,7 +72,7 @@ public class Sort {
         FilenameFilter init = new FilenameFilter() {
             @Override
             public boolean accept(File dir, String name) {
-                return name.toLowerCase().contains("pega") && !name.toLowerCase().contains("-sorted");
+                return (name.toLowerCase().contains("pegarules") || name.toLowerCase().contains("pegacluster")) && !name.toLowerCase().contains("-sorted") && !name.toLowerCase().contains("securityevent");
             }
         };
 
@@ -288,9 +287,11 @@ public class Sort {
                 tmp = sc.nextLine();
                 sc.close();
 
-                if (tmp.indexOf("{\"message\":") != 25) {
+                isJSON = tmp.startsWith("{");
+
+/*                if (tmp.indexOf("{\"message\":") != 25) {
                     isJSON = true;
-                }
+                } */
             }
 
             PreparedStatement ps = dbConnection.prepareStatement("truncate table data");
